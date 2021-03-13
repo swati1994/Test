@@ -1,28 +1,137 @@
-resource "aws_key_pair" "terraform-demo" {
-  key_name   = "terraform-demo"
-  public_key = "${file("terraform-demo.pub")}"
+provider "aws" {
+    region = "us-east-2"
+    access_key = "AKIATQ7U6PERYLRS3NKL"
+    secret_key = "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"
 }
 
-resource "aws_instance" "my-instance" {
-  count         = "2"
-  ami           = "${lookup(var.ami,var.aws_region)}"
-  instance_type = "t2.micro"
-  key_name      = "${aws_key_pair.terraform-demo.key_name}"
-  user_data     = "${file("install_apache.sh")}"
-  to_port       =  80
-  to_port       = 443
+
+resource "aws_instance" "web" {
+    count = "2"
+    ami = "ami-07a0844029df33d7d"
+    instance_type = "t2.micro"
+    tags = {
+        Name = "Hello "
+    }
+}
+
+resource "aws_vpc" "main" {
+    cidr_block = "10.0.0.0/16"
+     tags = {
+        Name = "Hello "
+    }
+}
+
+resource "aws_internet_gateway" "gw"{
+    vpc_id = aws_vpc-main.id
+    }
+
+    resource "aws_route_table" "r" {
+  vpc_id = aws_vpc-main.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.gw.id
+  }
+
+  route {
+    ipv6_cidr_block        = "::/0"
+    egress_only_gateway_id = aws_internet_gateway.gw.id
+  }
 
   tags = {
-    Name  = "Terraform-${count.index + 1}"
-    Batch = "5AM"
+    Name = "new"
   }
 }
 
-resource "aws_db_instance" "RDS1" {
-  allocated_storage    = 10
-  engine               = "mysql"
-  engine_version       = "5.7"
-  instance_class       = "db.t3.micro"
-  parameter_group_name = "default.mysql5.7"
-  skip_final_snapshot  = true
+
+resourec "aws_subnet" "subnet-1"{
+    vpc_id = aws_vpc-main.id
+    cidr_block = "10.0.1.0/24"
+
+    tags = {
+    Name = "new1"
+  }
+
+}
+
+resource "aws_route_table_association" "a" {
+     subnet_id = aws_subnet.subnet-1.id
+     route_table_id = aws_route_table.r.id
+}
+
+
+
+resource "aws_security_group" "allow_web" {
+  name        = "allow_web_traffic"
+  description = "Allow web traffic"
+  vpc_id      = aws_vpc-main.id
+
+  ingress {
+    description = "HTTPS from VPC"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = [0.0.0.0/0]
+  }
+
+  ingress {
+    description = "HTTP from VPC"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = [0.0.0.0/0]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "allow_web"
+  }
+}
+
+
+resource "aws_network_interface" "nic" {
+  subnet_id       = aws_subnet.subnet-1.id
+  private_ips     = ["10.0.1.50"]
+  security_groups = [aws_security_group.allow_web.id]
+
+  }
+
+
+  resource "aws_instance" "web-server-instance"{
+   ami = "ami-07a0844029df33d7d"
+   instance_type = "t2.micro"
+   availability_zone = "us-east-2"
+   key_name = "main-key"
+   network_interface {
+     device_index = 0
+     network_interface_id = aws_network_interface.nic.id
+   }
+   user_data = <<-EOF
+            #!/bin/bash
+            sudo apt update -y
+            sudo apt install apache2 -y
+            sudo systemctl start apache2
+            sudo bash -c 'echo your first webserver > /var/www/html/index.html'
+            EOF
+
+            tags = {
+
+                name = "web server"
+            }
+  }
+
+resource "aws_s3_bucket" "b" {
+  bucket = "my-tf-test-bucket"
+  acl    = "private"
+
+  tags = {
+    Name        = "My bucket"
+    Environment = "Dev"
+  }
 }
